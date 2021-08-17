@@ -1,7 +1,7 @@
 package terminal
 
 import (
-	"github.com/daswf852/counting/bot/mbus"
+	"github.com/daswf852/Shiba/bot/mbus"
 	"log"
 )
 

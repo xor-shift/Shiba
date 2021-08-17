@@ -1,8 +1,8 @@
 package reactionMod
 
 import (
-	"github.com/daswf852/counting/bot/mbus"
-	"github.com/daswf852/counting/bot/message"
+	"github.com/daswf852/Shiba/bot/mbus"
+	"github.com/daswf852/Shiba/bot/message"
 	"github.com/jmoiron/sqlx"
 	"log"
 	"math/rand"

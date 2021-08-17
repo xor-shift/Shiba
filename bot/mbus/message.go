@@ -1,6 +1,6 @@
 package mbus
 
-import "github.com/daswf852/counting/bot/message"
+import "github.com/daswf852/Shiba/bot/message"
 
 const (
 	MTypGeneric              = iota
