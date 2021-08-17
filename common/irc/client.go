@@ -1,7 +1,7 @@
 package irc
 
 import (
-	"github.com/daswf852/counting/common/ratelimit"
+	"github.com/daswf852/Shiba/common/ratelimit"
 	"log"
 	"strconv"
 	"strings"
@@ -72,10 +72,7 @@ type Client struct {
 }
 
 func NewClient(conf ClientConfig) (*Client, error) {
-	conn, err := NewConnection(conf.TLS, conf.Address)
-	if err != nil {
-		return nil, err
-	}
+	conn := NewConnection(conf.TLS, conf.Address)
 
 	if conf.PingFrequency == 0 {
 		conf.PingFrequency = 60
@@ -109,16 +106,15 @@ func NewClient(conf ClientConfig) (*Client, error) {
 	client.clientInfo.Nick = conf.Nick
 	client.clientInfo.User = conf.User
 
-	client.parser.SetCallback(client.parserHandler)
+	client.connection.SetIncomingCallback(client.parserHandler)
 
 	return client, nil
 }
 
 func (client *Client) Init() error {
-	client.workersWG.Add(1)
-	go client.receiver()
-	client.workersWG.Add(1)
-	go client.sender()
+	if err := client.connection.Init(); err != nil {
+		return err
+	}
 
 	time.NewTimer(time.Second * 60)
 	time.NewTicker(time.Second * 60)
@@ -306,7 +302,7 @@ func (client *Client) Close() error {
 }
 
 func (client *Client) SendMessage(message Message) {
-	client.outgoingQueue <- message
+	client.connection.OutgoingChannel <- message
 }
 
 func (client *Client) GetNick() string {
