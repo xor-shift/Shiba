@@ -1,8 +1,8 @@
-#Shiba
+# Shiba  
 Some bot idk  
 (golang)  
 ---
-##Stuff to run the bot:
+## Stuff to run the bot:  
  - Crete a DB: `sqlite3 botdb.sq3 -init ./bot/schema.sql`
  - Build the bot: `go build -o ./shiba ./bot`  
  - Run the bot: `./shiba ./botdb.sq3`  
