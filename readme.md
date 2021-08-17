@@ -1,6 +1,8 @@
 # Shiba  
+  
 Some bot idk  
 (golang)  
+  
 ---
 ## Stuff to run the bot:  
  - Crete a DB: `sqlite3 botdb.sq3 -init ./bot/schema.sql`
