@@ -9,7 +9,6 @@ import (
 	ircPlat "github.com/daswf852/Shiba/bot/platforms/ircp"
 	tPlat "github.com/daswf852/Shiba/bot/platforms/terminal"
 	"github.com/daswf852/Shiba/common/irc"
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 	"log"
@@ -170,7 +169,33 @@ func registerCommands(module *commandMod.CommandModule) {
 		Callback: func(argv []string, origMessage mbus.IncomingChatMessage, bus *mbus.Bus) {
 			bus.NewMessage(mbus.ModuleControlMessage{
 				TargetModule: mbus.ModuleIdentifier{"Module", "Reaction"},
-				StrArgv:      []string{"add", origMessage.SourceModule.String() + ":" + origMessage.ReplyTo, argv[1], argv[2], origMessage.SenderIdent},
+				StrArgv: []string{
+					"add",
+					origMessage.SourceModule.String() + ":" + origMessage.ReplyTo,
+					argv[1],
+					origMessage.Message.TrimLeft(origMessage.Message.Index(argv[1]) + len(argv[1]) + 1).ToIntermediate(),
+					origMessage.SenderIdent,
+				},
+				OtherData: nil,
+			})
+		},
+	})
+
+	module.RegisterCommand(commandMod.Command{
+		Ident:   "delr",
+		Desc:    "",
+		MinPerm: 11,
+		MinArgs: 2,
+		MaxArgs: 3,
+		Callback: func(argv []string, origMessage mbus.IncomingChatMessage, bus *mbus.Bus) {
+			args := []string{"del", origMessage.SourceModule.String() + ":" + origMessage.ReplyTo, argv[1]}
+			if len(argv) == 3 {
+				args = append(args, argv[2])
+			}
+
+			bus.NewMessage(mbus.ModuleControlMessage{
+				TargetModule: mbus.ModuleIdentifier{"Module", "Reaction"},
+				StrArgv:      args,
 				OtherData:    nil,
 			})
 		},
@@ -195,6 +220,11 @@ func init() {
 	db, err = sqlx.Connect("sqlite3", os.Args[1])
 	if err != nil {
 		log.Fatalln(err)
+	}
+
+	//TODO
+	_ = [1]string{
+		"update reactions set reply_str='0:0:-1:' || reply_str;",
 	}
 
 	prepIRC()

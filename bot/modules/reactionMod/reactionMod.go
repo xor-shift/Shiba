@@ -86,10 +86,16 @@ func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 		if target, targetExists := mod.reactionStore[replyIdent]; targetExists {
 			for regexStr, replyStrArr := range target {
 				if mod.regexCache[regexStr].MatchString(text) {
+					reply, err := message.FromIntermediate(replyStrArr[rand.Int()%len(replyStrArr)])
+					if err != nil {
+						log.Printf("Database has faulty reply_str in reactions for regex '%s', got error: %s",
+							regexStr, err)
+					}
+
 					mod.bus.NewMessage(mbus.OutgoingChatMessage{
 						TargetModule: incomingChatMessage.SourceModule,
 						To:           incomingChatMessage.ReplyTo,
-						Message:      message.PlaintextToMessage(replyStrArr[rand.Int()%len(replyStrArr)]),
+						Message:      reply,
 					})
 					return
 				}
@@ -132,6 +138,21 @@ func (mod *ReactionModule) addReaction(replyingTo, regexStr, replyStr, addedBy s
 	mod.reactionStore[replyingTo][regexStr] = append(mod.reactionStore[replyingTo][regexStr], replyStr)
 
 	mod.db.MustExec("insert into reactions (when_replying_to, regex_str, reply_str, added_by) values (?, ?, ?, ?);", replyingTo, regexStr, replyStr, addedBy)
+
+	return true
+}
+
+func (mod *ReactionModule) delReaction(replyingTo, regexStr string) bool {
+	if store, ok := mod.reactionStore[replyingTo]; ok {
+		if _, ok := store[regexStr]; ok {
+			delete(mod.reactionStore[replyingTo], regexStr)
+			_, _ = mod.db.Exec("delete from reactions where when_replying_to = ? and regex_str = ?", replyingTo, regexStr)
+		} else {
+			return false
+		}
+	} else {
+		return false
+	}
 
 	return true
 }
