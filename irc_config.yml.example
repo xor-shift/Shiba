@@ -1,0 +1,20 @@
+networks:
+  - name:
+      Network Name
+    host:
+      example.com
+    port:
+      6697
+    tls:
+      true
+    realname:
+      Bot Real Name
+    nick:
+      BotNick
+    username:
+      botuser
+    password: 
+    ping_freq: 60
+    ping_timeout: 180
+    channels:
+      - "#example"

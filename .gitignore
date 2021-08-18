@@ -1,2 +1,6 @@
 run
 .idea
+irc_config.yml
+*.sql3
+*.sqlite
+*.sqlite3

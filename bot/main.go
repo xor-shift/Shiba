@@ -2,6 +2,11 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"strconv"
+	"strings"
+
 	"github.com/daswf852/Shiba/bot/mbus"
 	"github.com/daswf852/Shiba/bot/message"
 	"github.com/daswf852/Shiba/bot/modules/commandMod"
@@ -9,12 +14,12 @@ import (
 	ircPlat "github.com/daswf852/Shiba/bot/platforms/ircp"
 	tPlat "github.com/daswf852/Shiba/bot/platforms/terminal"
 	"github.com/daswf852/Shiba/common/irc"
+
+	// _ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
-	"log"
-	"os"
-	"strconv"
-	"strings"
+
+	"gopkg.in/yaml.v2"
 )
 
 var (
@@ -22,37 +27,57 @@ var (
 	bus = mbus.New()
 )
 
+type YmlConfig struct {
+	Networks []YmlNetwork `yaml:"networks"`
+}
+
+type YmlNetwork struct {
+	SubIdent string   `yaml:"name"`
+	Channels []string `yaml:"channels"`
+
+	Address string `yaml:"host"`
+	Port    string `yaml:"port"`
+	TLS     bool   `yaml:"tls"`
+
+	Nick     string `yaml:"nick"`
+	User     string `yaml:"username"`
+	RealName string `yaml:"realname"`
+
+	Pass string `yaml:"password"`
+
+	PingFrequency int `yaml:"ping_freq"`
+	PingTimeout   int `yaml:"ping_timeout"`
+}
+
+func readConf(filename string) (*YmlConfig, error) {
+	f, err := os.Open(filename)
+
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var cfg YmlConfig
+	decoder := yaml.NewDecoder(f)
+	err = decoder.Decode(&cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
 func prepIRC() {
-	res, err := db.Queryx("select subident, auto_join, address, tls, nick_name, user_name, real_name, pass, ping_freq, ping_timeout from irc_configs;")
+	fmt.Println("Parsing IRC config...")
+	networkConf, err := readConf("irc_config.yml")
+
 	if err != nil {
 		log.Fatalln(err)
 	}
+	fmt.Println("Initialising networks...")
 
-	type DBIRCConfig struct {
-		SubIdent string `db:"subident"`
-		AutoJoin string `db:"auto_join"`
-
-		Address string `db:"address"`
-		TLS     bool   `db:"tls"`
-
-		Nick     string `db:"nick_name"`
-		User     string `db:"user_name"`
-		RealName string `db:"real_name"`
-
-		Pass string `db:"pass"`
-
-		PingFrequency int `db:"ping_freq"`
-		PingTimeout   int `db:"ping_timeout"`
-	}
-
-	for res.Next() {
-		conf := DBIRCConfig{}
-		if err := res.StructScan(&conf); err != nil {
-			log.Fatalln(err)
-		}
-
+	for _, conf := range networkConf.Networks {
 		platform, err := ircPlat.New(conf.SubIdent, irc.ClientConfig{
-			Address:       conf.Address,
+			Address:       conf.Address + ":" + conf.Port,
 			TLS:           conf.TLS,
 			Nick:          conf.Nick,
 			User:          conf.User,
@@ -67,7 +92,7 @@ func prepIRC() {
 		}
 
 		platform.Client.SetPostInitCallback(func() {
-			for _, ch := range strings.Split(conf.AutoJoin, ";") {
+			for _, ch := range conf.Channels {
 				bus.NewMessage(mbus.ModuleControlMessage{
 					TargetModule: platform.GetIdentifier(),
 					StrArgv:      []string{"join", ch},
