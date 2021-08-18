@@ -67,13 +67,13 @@ func readConf(filename string) (*YmlConfig, error) {
 }
 
 func prepIRC() {
-	fmt.Println("Parsing IRC config...")
+	log.Println("Parsing IRC config...")
 	networkConf, err := readConf("irc_config.yml")
 
 	if err != nil {
 		log.Fatalln(err)
 	}
-	fmt.Println("Initialising networks...")
+	log.Println("Initialising networks...")
 
 	for _, conf := range networkConf.Networks {
 		platform, err := ircPlat.New(conf.SubIdent, irc.ClientConfig{
@@ -181,6 +181,37 @@ func registerCommands(module *commandMod.CommandModule) {
 				},
 				StrArgv:   []string{"setperm", argv[1]},
 				OtherData: map[string]interface{}{"level": i},
+			})
+		},
+	})
+
+	module.RegisterCommand(commandMod.Command{
+		Ident:   "gibadmin",
+		Desc:    "Generates serverside secret to auth and grant admin permissions on sender",
+		MinPerm: 0,
+		MinArgs: 1, // blank to generate
+		MaxArgs: 2, // or provide <secret> to auth
+		Callback: func(argv []string, origMessage mbus.IncomingChatMessage, bus *mbus.Bus) {
+			if len(argv) > 1 {
+				// Attempt to auth with secret
+				bus.NewMessage(mbus.ModuleControlMessage{
+					TargetModule: mbus.ModuleIdentifier{
+						MainIdent: "Module",
+						SubIdent:  "Command",
+					},
+					StrArgv:   []string{"auth_token", argv[1]},
+					OtherData: map[string]interface{}{"sender_identity": origMessage.SenderIdent},
+				})
+				return
+			}
+			// Generate a secret token to be used to grant admin for calling user ident
+			bus.NewMessage(mbus.ModuleControlMessage{
+				TargetModule: mbus.ModuleIdentifier{
+					MainIdent: "Module",
+					SubIdent:  "Command",
+				},
+				StrArgv:   []string{"gen_token"},
+				OtherData: map[string]interface{}{"sender_identity": origMessage.SenderIdent},
 			})
 		},
 	})
