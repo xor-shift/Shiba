@@ -14,12 +14,18 @@ create table irc_configs
     ping_timeout int           default 120 not null
 );
 
-create table reactions
+CREATE TABLE reactions
 (
-    when_replying_to varchar(160) default 'stub'   not null,
-    regex_str        varchar(4096)                 not null,
-    reply_str        varchar(4096)                 not null,
-    added_by         varchar(160) default 'system' not null
+    id                  INTEGER PRIMARY KEY                 NOT NULL,
+    when_replying_to    VARCHAR(160) DEFAULT 'stub'         NOT NULL,
+    regex_str           VARCHAR(4096)                       NOT NULL,
+    reply_str           VARCHAR(4096)                       NOT NULL,
+    added_by            VARCHAR(160) DEFAULT 'system'       NOT NULL,
+    deleted_by          VARCHAR(160) DEFAULT 'system',
+    created_at          DATETIME DEFAULT current_timestamp  NOT NULL,
+    updated_at          DATETIME DEFAULT current_timestamp  NOT NULL,
+    deleted_at          DATETIME DEFAULT NULL,
+    hits                INTEGER DEFAULT 0                   NOT NULL
 );
 
 create table users

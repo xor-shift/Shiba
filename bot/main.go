@@ -239,16 +239,35 @@ func registerCommands(module *commandMod.CommandModule) {
 
 	module.RegisterCommand(commandMod.Command{
 		Ident:   "delr",
-		Desc:    "",
+		Desc:    "Delete reaction by supplied regex. Or by passing in a reaction id: -id <rid>",
 		MinPerm: 11,
-		MinArgs: 2,
-		MaxArgs: 3,
+		MinArgs: 2, // regex expression to delete
+		MaxArgs: 3, // or pass in an id with delr -id <reaction id>
 		Callback: func(argv []string, origMessage mbus.IncomingChatMessage, bus *mbus.Bus) {
-			args := []string{"del", origMessage.SourceModule.String() + ":" + origMessage.ReplyTo, argv[1]}
-			if len(argv) == 3 {
-				args = append(args, argv[2])
+			args := []string{"delete", origMessage.SourceModule.String(), origMessage.ReplyTo, origMessage.SenderIdent}
+			if len(argv) > 1 {
+				args = append(args, argv[1:]...)
 			}
 
+			bus.NewMessage(mbus.ModuleControlMessage{
+				TargetModule: mbus.ModuleIdentifier{"Module", "Reaction"},
+				StrArgv:      args,
+				OtherData:    nil,
+			})
+		},
+	})
+
+	module.RegisterCommand(commandMod.Command{
+		Ident:   "listr",
+		Desc:    "List reactions",
+		MinPerm: 0,
+		MinArgs: 1, // blank to list all
+		MaxArgs: 2, // phrase or regex to search reactions
+		Callback: func(argv []string, origMessage mbus.IncomingChatMessage, bus *mbus.Bus) {
+			args := []string{"list", origMessage.SourceModule.String(), origMessage.ReplyTo}
+			if len(argv) > 1 {
+				args = append(args, argv[1:]...)
+			}
 			bus.NewMessage(mbus.ModuleControlMessage{
 				TargetModule: mbus.ModuleIdentifier{"Module", "Reaction"},
 				StrArgv:      args,

@@ -1,49 +1,69 @@
 package reactionMod
 
 import (
-	"github.com/daswf852/Shiba/bot/mbus"
-	"github.com/daswf852/Shiba/bot/message"
-	"github.com/jmoiron/sqlx"
+	"database/sql"
+	"fmt"
 	"log"
 	"math/rand"
 	"regexp"
+	"strconv"
+	"time"
+
+	"github.com/daswf852/Shiba/bot/mbus"
+	"github.com/daswf852/Shiba/bot/message"
+	"github.com/jmoiron/sqlx"
 )
 
+type DBReaction struct {
+	Id          int64          `db:"id"`
+	ReplyTarget string         `db:"when_replying_to"`
+	RegexStr    string         `db:"regex_str"`
+	ReplyStr    string         `db:"reply_str"`
+	AddedBy     string         `db:"added_by"`
+	DeletedBy   sql.NullString `db:"deleted_by"`
+	CreatedAt   string         `db:"created_at"`
+	UpdatedAt   string         `db:"updated_at"`
+	DeletedAt   sql.NullString `db:"deleted_at"`
+	Hits        string         `db:"hits"`
+}
 type ReactionModule struct {
 	bus *mbus.Bus
 
 	db            *sqlx.DB
-	reactionStore map[string]map[string][]string
+	reactionStore map[string]map[string][]DBReaction
 	regexCache    map[string]*regexp.Regexp
+}
+
+func init() {
+	log.Println("Reaction Module Init...")
+	rand.Seed(time.Now().UnixNano())
 }
 
 func New(db *sqlx.DB) *ReactionModule {
 	mod := &ReactionModule{
 		bus:           nil,
 		db:            db,
-		reactionStore: make(map[string]map[string][]string),
+		reactionStore: make(map[string]map[string][]DBReaction),
 		regexCache:    make(map[string]*regexp.Regexp),
 	}
 
-	type DBReaction struct {
-		ReplyTarget string `db:"when_replying_to"`
-		RegexStr    string `db:"regex_str"`
-		ReplyStr    string `db:"reply_str"`
-	}
-
-	res, err := db.Queryx("select when_replying_to, regex_str, reply_str from reactions;")
+	res, err := db.Queryx("select id, when_replying_to, regex_str, reply_str, added_by, deleted_by, created_at, updated_at, deleted_at, hits from reactions WHERE deleted_at IS NULL;")
 	if err != nil {
 		log.Fatalln(err)
 	}
-
+	// Reaction Store
+	// 		ReplyTarget
+	//			RegexStr
+	//				[DBReaction, ...]
 	for res.Next() {
 		reac := DBReaction{}
 		if err := res.StructScan(&reac); err != nil {
 			log.Fatalln(err)
 		}
 
+		// Create reaction store entry if not exists
 		if _, targetExists := mod.reactionStore[reac.ReplyTarget]; !targetExists {
-			mod.reactionStore[reac.ReplyTarget] = make(map[string][]string)
+			mod.reactionStore[reac.ReplyTarget] = make(map[string][]DBReaction)
 		}
 
 		regex, err := regexp.Compile(reac.RegexStr)
@@ -51,11 +71,11 @@ func New(db *sqlx.DB) *ReactionModule {
 			log.Println(err)
 			continue
 		}
-
+		// Append reaction to reaction store entry
 		if arr, ok := mod.reactionStore[reac.ReplyTarget][reac.RegexStr]; ok {
-			mod.reactionStore[reac.ReplyTarget][reac.RegexStr] = append(arr, reac.ReplyStr)
+			mod.reactionStore[reac.ReplyTarget][reac.RegexStr] = append(arr, reac)
 		} else {
-			mod.reactionStore[reac.ReplyTarget][reac.RegexStr] = []string{reac.ReplyStr}
+			mod.reactionStore[reac.ReplyTarget][reac.RegexStr] = []DBReaction{reac}
 		}
 		mod.regexCache[reac.RegexStr] = regex
 	}
@@ -79,28 +99,78 @@ func (mod *ReactionModule) OnUnregister() {
 	log.Println("Reaction module unregistered")
 }
 
+func (mod *ReactionModule) getReactionById(id int64) DBReaction {
+	reac := DBReaction{}
+	res, err := mod.db.Queryx("select id, when_replying_to, regex_str, reply_str, added_by, deleted_by, created_at, updated_at, deleted_at, hits from reactions;")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	for res.Next() {
+		if err := res.StructScan(&reac); err != nil {
+			log.Fatalln(err)
+		}
+	}
+	return reac
+}
+
+func (mod *ReactionModule) getMatches(replyIdent string, text string) []DBReaction {
+	var result []DBReaction
+
+	if target, targetExists := mod.reactionStore[replyIdent]; targetExists {
+		if len(text) > 0 {
+			// Searching for matches in cache
+			for regexStr, replyStrArr := range target {
+				if mod.regexCache[regexStr].MatchString(text) {
+					for _, item := range replyStrArr {
+						// entry := map[string]interface{}{
+						// 	"regexStr": regexStr,
+						// 	"replyStr": replyStr,
+						// }
+						result = append(result, item)
+					}
+				}
+			}
+		} else {
+			// Return all entries in cache
+			for _, replyStrArr := range target {
+				for _, item := range replyStrArr {
+					// entry := map[string]interface{}{
+					// 	"regexStr": regexStr,
+					// 	"replyStr": replyStr,
+					// }
+					result = append(result, item)
+				}
+			}
+		}
+	}
+
+	return result
+}
+
 func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 	if incomingChatMessage, ok := msg.(mbus.IncomingChatMessage); ok {
 		text := message.MessageToPlaintext(incomingChatMessage.Message)
 		replyIdent := incomingChatMessage.SourceModule.String() + ":" + incomingChatMessage.ReplyTo
-		if target, targetExists := mod.reactionStore[replyIdent]; targetExists {
-			for regexStr, replyStrArr := range target {
-				if mod.regexCache[regexStr].MatchString(text) {
-					reply, err := message.FromIntermediate(replyStrArr[rand.Int()%len(replyStrArr)])
-					if err != nil {
-						log.Printf("Database has faulty reply_str in reactions for regex '%s', got error: %s",
-							regexStr, err)
-					}
+		matches := mod.getMatches(replyIdent, text)
 
-					mod.bus.NewMessage(mbus.OutgoingChatMessage{
-						TargetModule: incomingChatMessage.SourceModule,
-						To:           incomingChatMessage.ReplyTo,
-						Message:      reply,
-					})
-					return
-				}
+		if len(matches) > 0 {
+			picked := matches[rand.Int()%len(matches)]
+			selectedResponse := picked.ReplyStr
+
+			reply, err := message.FromIntermediate(selectedResponse)
+			if err != nil {
+				log.Printf("Database has faulty reply_str in reactions for regex: %s, got error: %s", picked.RegexStr, err)
+				return
 			}
+
+			mod.bus.NewMessage(mbus.OutgoingChatMessage{
+				TargetModule: incomingChatMessage.SourceModule,
+				To:           incomingChatMessage.ReplyTo,
+				Message:      reply,
+			})
 		}
+
 	} else if controlMessage, ok := msg.(mbus.ModuleControlMessage); ok {
 		if controlMessage.StrArgv[0] == "add" {
 			whenReplyingTo := controlMessage.StrArgv[1]
@@ -108,6 +178,126 @@ func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 			replyStr := controlMessage.StrArgv[3]
 			addedBy := controlMessage.StrArgv[4]
 			mod.addReaction(whenReplyingTo, regexStr, replyStr, addedBy)
+			return
+		}
+
+		if controlMessage.StrArgv[0] == "delete" {
+			// log.Println("delete reaction")
+			// log.Printf("Args: %s", controlMessage.StrArgv)
+			// 0 - delete
+			// 1 - source module (network)
+			// 2 - reply to channel
+			// 3 - senderIdent
+			// 4 - regexStr
+			// 5 - reaction id // prev flag can be ignored (3)
+
+			replyIdent := controlMessage.StrArgv[1] + ":" + controlMessage.StrArgv[2]
+
+			targetModule := mbus.ModuleIdentifierFromString(controlMessage.StrArgv[1])
+
+			replyTo := controlMessage.StrArgv[2] // channel
+			deletedBy := controlMessage.StrArgv[3]
+			if len(controlMessage.StrArgv) == 5 {
+				regexStr := controlMessage.StrArgv[4]
+				// Delete by regex string
+				ok := mod.delReactions(replyIdent, deletedBy, regexStr)
+				replyMessage := message.PlaintextToMessage("Uh oh")
+				if ok {
+					replyMessage = message.PlaintextToMessage("Ok")
+				}
+
+				mod.bus.NewMessage(mbus.OutgoingChatMessage{
+					TargetModule: targetModule,
+					To:           replyTo,
+					Message:      replyMessage,
+				})
+				return
+			} else if len(controlMessage.StrArgv) == 6 {
+				// Delete by reaction id
+				if controlMessage.StrArgv[4] != "-id" {
+					return
+				}
+				replyMessage := message.PlaintextToMessage("Uh oh")
+				if rId, err := strconv.ParseInt(controlMessage.StrArgv[5], 10, 64); err == nil {
+					ok := mod.delReactionById(replyIdent, deletedBy, rId)
+					if ok {
+						replyMessage = message.PlaintextToMessage("Ok")
+					}
+				}
+
+				mod.bus.NewMessage(mbus.OutgoingChatMessage{
+					TargetModule: targetModule,
+					To:           replyTo,
+					Message:      replyMessage,
+				})
+				return
+			}
+		}
+
+		if controlMessage.StrArgv[0] == "list" {
+			// log.Println("list reaction")
+			// log.Printf("Args: %s", controlMessage.StrArgv)
+			// 0 - list
+			// 1 - source module (network)
+			// 2 - reply to channel
+			// 3 - search string (optional)
+			replyIdent := controlMessage.StrArgv[1] + ":" + controlMessage.StrArgv[2]
+
+			targetModule := mbus.ModuleIdentifierFromString(controlMessage.StrArgv[1])
+
+			replyTo := controlMessage.StrArgv[2]
+			// log.Printf("Target module: %s", controlMessage.TargetModule.String())
+			// log.Printf("replyTo: %s", replyTo)
+
+			if len(controlMessage.StrArgv) > 3 {
+				// Search for reaction matches
+				results := mod.getMatches(replyIdent, controlMessage.StrArgv[3])
+				// log.Printf("List Matches: %d", len(results))
+
+				// TODO: refactor below
+				if len(results) > 0 {
+					for _, item := range results {
+						line := fmt.Sprintf("%s: %s %s", "1", item.RegexStr, item.ReplyStr)
+						// log.Println(line)
+						replyMessage := message.PlaintextToMessage(line)
+
+						mod.bus.NewMessage(mbus.OutgoingChatMessage{
+							TargetModule: targetModule,
+							To:           replyTo,
+							Message:      replyMessage,
+						})
+					}
+					return
+				}
+			} else {
+				// List all
+				// log.Println("Listing all reactions...")
+				results := mod.getMatches(replyIdent, "")
+				// log.Printf("List All Matches: %d", len(results))
+
+				// TODO: refactor below
+				if len(results) > 0 {
+					for _, item := range results {
+						line := fmt.Sprintf("%d. %s %s", item.Id, item.RegexStr, item.ReplyStr)
+						// log.Println(line)
+						replyMessage := message.PlaintextToMessage(line)
+
+						mod.bus.NewMessage(mbus.OutgoingChatMessage{
+							TargetModule: targetModule,
+							To:           replyTo,
+							Message:      replyMessage,
+						})
+					}
+					return
+				}
+			}
+
+			mod.bus.NewMessage(mbus.OutgoingChatMessage{
+				TargetModule: targetModule,
+				To:           replyTo,
+				Message:      message.PlaintextToMessage("No results found."),
+			})
+			return
 		}
 	}
 }
@@ -122,37 +312,94 @@ func (mod *ReactionModule) addReaction(replyingTo, regexStr, replyStr, addedBy s
 	}
 
 	if _, ok := mod.reactionStore[replyingTo]; !ok {
-		mod.reactionStore[replyingTo] = make(map[string][]string)
+		mod.reactionStore[replyingTo] = make(map[string][]DBReaction)
 	}
 
 	if reacs, ok := mod.reactionStore[replyingTo][regexStr]; ok {
 		for _, v := range reacs {
-			if v == replyStr {
+			// Don't allow dupe reacts (for the same regex)
+			if v.ReplyStr == replyStr {
 				return false
 			}
 		}
 	} else {
-		mod.reactionStore[replyingTo][regexStr] = make([]string, 0)
+		mod.reactionStore[replyingTo][regexStr] = []DBReaction{}
 	}
 
-	mod.reactionStore[replyingTo][regexStr] = append(mod.reactionStore[replyingTo][regexStr], replyStr)
+	result := mod.db.MustExec("insert into reactions (when_replying_to, regex_str, reply_str, added_by) values (?, ?, ?, ?);", replyingTo, regexStr, replyStr, addedBy)
 
-	mod.db.MustExec("insert into reactions (when_replying_to, regex_str, reply_str, added_by) values (?, ?, ?, ?);", replyingTo, regexStr, replyStr, addedBy)
+	lastId, err := result.LastInsertId()
+
+	if err != nil {
+		log.Printf("Database insert error: %s", err)
+		return false
+	}
+
+	// Retrieve by id
+	// TODO: just set the struct fields properly and skip this step
+	reactEntry := mod.getReactionById(lastId)
+
+	// Add to memory cache
+	mod.reactionStore[replyingTo][regexStr] = append(mod.reactionStore[replyingTo][regexStr], reactEntry)
 
 	return true
 }
 
-func (mod *ReactionModule) delReaction(replyingTo, regexStr string) bool {
+func (mod *ReactionModule) delReactionById(replyingTo string, deletedBy string, rId int64) bool {
 	if store, ok := mod.reactionStore[replyingTo]; ok {
-		if _, ok := store[regexStr]; ok {
-			delete(mod.reactionStore[replyingTo], regexStr)
-			_, _ = mod.db.Exec("delete from reactions where when_replying_to = ? and regex_str = ?", replyingTo, regexStr)
-		} else {
-			return false
+		// Look through all entries to find matching id
+		for regexStr, reactArr := range store {
+			deleteIndex := -1
+			for index, react := range reactArr {
+				if react.Id == rId {
+					log.Printf("Deleting reaction by id: %d", rId)
+					_, err := mod.db.Exec("UPDATE reactions SET deleted_at = current_timestamp, deleted_by = ? WHERE id = ?;", deletedBy, rId)
+
+					if err != nil {
+						log.Printf("Database delete error: %s", err)
+						return false
+					}
+					// Delete from cache
+					// TODO: Maybe rebuild cache from db instead?
+					deleteIndex = index
+					break
+				}
+			}
+
+			if deleteIndex > -1 {
+				// Remove index from reactArr
+				if len(mod.reactionStore[replyingTo][regexStr]) > 1 {
+					mod.reactionStore[replyingTo][regexStr] = append(mod.reactionStore[replyingTo][regexStr][:deleteIndex],
+						mod.reactionStore[replyingTo][regexStr][deleteIndex+1:]...)
+				} else {
+					// Remove regexStr entirely
+					delete(mod.reactionStore[replyingTo], regexStr)
+				}
+				return true
+			}
 		}
 	} else {
 		return false
 	}
 
-	return true
+	return false
+}
+
+// This will delete all reactions under the regexStr
+func (mod *ReactionModule) delReactions(replyingTo, deletedBy string, regexStr string) bool {
+	if store, ok := mod.reactionStore[replyingTo]; ok {
+		if _, ok := store[regexStr]; ok {
+			log.Printf("Deleting reactions for: %s ...", regexStr)
+			delete(mod.reactionStore[replyingTo], regexStr)
+			_, err := mod.db.Exec("UPDATE reactions SET deleted_at = current_timestamp, deleted_by = ? WHERE when_replying_to = ? and regex_str = ?", deletedBy, replyingTo, regexStr)
+
+			if err != nil {
+				log.Printf("Database delete error: %s", err)
+				return false
+			}
+
+			return true
+		}
+	}
+	return false
 }
