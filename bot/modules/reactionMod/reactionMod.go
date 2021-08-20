@@ -114,7 +114,20 @@ func (mod *ReactionModule) getReactionById(id int64) DBReaction {
 	return reac
 }
 
-func (mod *ReactionModule) getMatches(replyIdent string, text string) []DBReaction {
+func (mod *ReactionModule) getAllReactions(replyIdent string) []DBReaction {
+	var result []DBReaction
+
+	if target, targetExists := mod.reactionStore[replyIdent]; targetExists {
+		// Return all entries in cache
+		for _, replyStrArr := range target {
+			result = append(result, replyStrArr...)
+		}
+	}
+
+	return result
+}
+
+func (mod *ReactionModule) getMatchesFromText(replyIdent string, text string) []DBReaction {
 	var result []DBReaction
 
 	if target, targetExists := mod.reactionStore[replyIdent]; targetExists {
@@ -122,25 +135,23 @@ func (mod *ReactionModule) getMatches(replyIdent string, text string) []DBReacti
 			// Searching for matches in cache
 			for regexStr, replyStrArr := range target {
 				if mod.regexCache[regexStr].MatchString(text) {
-					for _, item := range replyStrArr {
-						// entry := map[string]interface{}{
-						// 	"regexStr": regexStr,
-						// 	"replyStr": replyStr,
-						// }
-						result = append(result, item)
-					}
+					result = append(result, replyStrArr...)
 				}
 			}
-		} else {
-			// Return all entries in cache
-			for _, replyStrArr := range target {
-				for _, item := range replyStrArr {
-					// entry := map[string]interface{}{
-					// 	"regexStr": regexStr,
-					// 	"replyStr": replyStr,
-					// }
-					result = append(result, item)
-				}
+		}
+	}
+
+	return result
+}
+
+func (mod *ReactionModule) getRegexEntries(replyIdent string, regexStr string) []DBReaction {
+	var result []DBReaction
+
+	if target, targetExists := mod.reactionStore[replyIdent]; targetExists {
+		if len(regexStr) > 0 {
+			// Just get from regexStr key
+			if reactArr, regexStrExists := target[regexStr]; regexStrExists {
+				return reactArr
 			}
 		}
 	}
@@ -152,11 +163,12 @@ func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 	if incomingChatMessage, ok := msg.(mbus.IncomingChatMessage); ok {
 		text := message.MessageToPlaintext(incomingChatMessage.Message)
 		replyIdent := incomingChatMessage.SourceModule.String() + ":" + incomingChatMessage.ReplyTo
-		matches := mod.getMatches(replyIdent, text)
+		matches := mod.getMatchesFromText(replyIdent, text)
 
 		if len(matches) > 0 {
 			picked := matches[rand.Int()%len(matches)]
 			selectedResponse := picked.ReplyStr
+			// log.Printf("debug: selected match: %s", selectedResponse)
 
 			reply, err := message.FromIntermediate(selectedResponse)
 			if err != nil {
@@ -173,6 +185,8 @@ func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 
 	} else if controlMessage, ok := msg.(mbus.ModuleControlMessage); ok {
 		if controlMessage.StrArgv[0] == "add" {
+			// log.Println("add reaction args:")
+			// log.Println(controlMessage.StrArgv)
 			whenReplyingTo := controlMessage.StrArgv[1]
 			regexStr := controlMessage.StrArgv[2]
 			replyStr := controlMessage.StrArgv[3]
@@ -188,8 +202,8 @@ func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 			// 1 - source module (network)
 			// 2 - reply to channel
 			// 3 - senderIdent
-			// 4 - regexStr
-			// 5 - reaction id // prev flag can be ignored (3)
+			// 4 - regexStr | or -id flag
+			// 5 - reaction id // prev flag can be ignored
 
 			replyIdent := controlMessage.StrArgv[1] + ":" + controlMessage.StrArgv[2]
 
@@ -233,6 +247,49 @@ func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 				return
 			}
 		}
+		if controlMessage.StrArgv[0] == "list_for" {
+			// 0 - list_for
+			// 1 - source module (network)
+			// 2 - reply to channel
+			// 3 - triggerStr
+
+			replyIdent := controlMessage.StrArgv[1] + ":" + controlMessage.StrArgv[2]
+
+			targetModule := mbus.ModuleIdentifierFromString(controlMessage.StrArgv[1])
+
+			replyTo := controlMessage.StrArgv[2]
+			triggerStr := controlMessage.StrArgv[3]
+
+			// Search for reaction of given trigger string
+			results := mod.getMatchesFromText(replyIdent, triggerStr)
+
+			if len(results) > 0 {
+				for _, item := range results {
+
+					m, err := message.FromIntermediate(item.ReplyStr)
+					if err != nil {
+						log.Printf("Database has faulty reply_str in reactions for regex: %s, got error: %s", item.RegexStr, err)
+						continue
+					}
+					line := fmt.Sprintf("%d: %s %s", item.Id, item.RegexStr, message.MessageToPlaintext(m))
+					// log.Println(line)
+					replyMessage := message.PlaintextToMessage(line)
+
+					mod.bus.NewMessage(mbus.OutgoingChatMessage{
+						TargetModule: targetModule,
+						To:           replyTo,
+						Message:      replyMessage,
+					})
+				}
+				return
+			}
+			mod.bus.NewMessage(mbus.OutgoingChatMessage{
+				TargetModule: targetModule,
+				To:           replyTo,
+				Message:      message.PlaintextToMessage("No matches found."),
+			})
+			return
+		}
 
 		if controlMessage.StrArgv[0] == "list" {
 			// log.Println("list reaction")
@@ -240,7 +297,7 @@ func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 			// 0 - list
 			// 1 - source module (network)
 			// 2 - reply to channel
-			// 3 - search string (optional)
+			// 3 - regexStr (optional)
 			replyIdent := controlMessage.StrArgv[1] + ":" + controlMessage.StrArgv[2]
 
 			targetModule := mbus.ModuleIdentifierFromString(controlMessage.StrArgv[1])
@@ -250,14 +307,20 @@ func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 			// log.Printf("replyTo: %s", replyTo)
 
 			if len(controlMessage.StrArgv) > 3 {
-				// Search for reaction matches
-				results := mod.getMatches(replyIdent, controlMessage.StrArgv[3])
+				// Search for reaction of given regexStr
+				results := mod.getRegexEntries(replyIdent, controlMessage.StrArgv[3])
 				// log.Printf("List Matches: %d", len(results))
 
 				// TODO: refactor below
 				if len(results) > 0 {
 					for _, item := range results {
-						line := fmt.Sprintf("%s: %s %s", "1", item.RegexStr, item.ReplyStr)
+
+						m, err := message.FromIntermediate(item.ReplyStr)
+						if err != nil {
+							log.Printf("Database has faulty reply_str in reactions for regex: %s, got error: %s", item.RegexStr, err)
+							continue
+						}
+						line := fmt.Sprintf("%d: %s %s", item.Id, item.RegexStr, message.MessageToPlaintext(m))
 						// log.Println(line)
 						replyMessage := message.PlaintextToMessage(line)
 
@@ -272,13 +335,19 @@ func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 			} else {
 				// List all
 				// log.Println("Listing all reactions...")
-				results := mod.getMatches(replyIdent, "")
+				results := mod.getAllReactions(replyIdent)
 				// log.Printf("List All Matches: %d", len(results))
 
 				// TODO: refactor below
 				if len(results) > 0 {
 					for _, item := range results {
-						line := fmt.Sprintf("%d. %s %s", item.Id, item.RegexStr, item.ReplyStr)
+
+						m, err := message.FromIntermediate(item.ReplyStr)
+						if err != nil {
+							log.Printf("Database has faulty reply_str in reactions for regex: %s, got error: %s", item.RegexStr, err)
+							continue
+						}
+						line := fmt.Sprintf("%d: %s %s", item.Id, item.RegexStr, message.MessageToPlaintext(m))
 						// log.Println(line)
 						replyMessage := message.PlaintextToMessage(line)
 
@@ -295,7 +364,7 @@ func (mod *ReactionModule) OnMessage(msg mbus.Message) {
 			mod.bus.NewMessage(mbus.OutgoingChatMessage{
 				TargetModule: targetModule,
 				To:           replyTo,
-				Message:      message.PlaintextToMessage("No results found."),
+				Message:      message.PlaintextToMessage("No regex matches found."),
 			})
 			return
 		}

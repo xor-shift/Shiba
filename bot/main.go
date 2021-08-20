@@ -228,9 +228,9 @@ func registerCommands(module *commandMod.CommandModule) {
 				StrArgv: []string{
 					"add",
 					origMessage.SourceModule.String() + ":" + origMessage.ReplyTo,
-					argv[1],
-					origMessage.Message.TrimLeft(origMessage.Message.Index(argv[1]) + len(argv[1]) + 1).ToIntermediate(),
-					origMessage.SenderIdent,
+					argv[1], // regexStr
+					origMessage.Message.TrimLeft(origMessage.Message.Index(argv[1]) + len(argv[1]) + 1).ToIntermediate(), // replyStr
+					origMessage.SenderIdent, // addedBy
 				},
 				OtherData: nil,
 			})
@@ -259,12 +259,31 @@ func registerCommands(module *commandMod.CommandModule) {
 
 	module.RegisterCommand(commandMod.Command{
 		Ident:   "listr",
-		Desc:    "List reactions",
+		Desc:    "List reactions by supplied regex or leave blank to list all reaction",
 		MinPerm: 0,
 		MinArgs: 1, // blank to list all
 		MaxArgs: 2, // phrase or regex to search reactions
 		Callback: func(argv []string, origMessage mbus.IncomingChatMessage, bus *mbus.Bus) {
 			args := []string{"list", origMessage.SourceModule.String(), origMessage.ReplyTo}
+			if len(argv) > 1 {
+				args = append(args, argv[1:]...)
+			}
+			bus.NewMessage(mbus.ModuleControlMessage{
+				TargetModule: mbus.ModuleIdentifier{"Module", "Reaction"},
+				StrArgv:      args,
+				OtherData:    nil,
+			})
+		},
+	})
+
+	module.RegisterCommand(commandMod.Command{
+		Ident:   "listrfor",
+		Desc:    "List reactions that are triggered by supplied string message",
+		MinPerm: 0,
+		MinArgs: 2, // blank to list all
+		MaxArgs: 2, // phrase search reactions
+		Callback: func(argv []string, origMessage mbus.IncomingChatMessage, bus *mbus.Bus) {
+			args := []string{"list_for", origMessage.SourceModule.String(), origMessage.ReplyTo}
 			if len(argv) > 1 {
 				args = append(args, argv[1:]...)
 			}
