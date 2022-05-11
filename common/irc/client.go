@@ -1,7 +1,7 @@
 package irc
 
 import (
-	"github.com/daswf852/Shiba/common/ratelimit"
+	"github.com/xor-shift/Shiba/common/ratelimit"
 	"log"
 	"strconv"
 	"strings"

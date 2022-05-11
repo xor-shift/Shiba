@@ -1,9 +1,9 @@
 package ircp
 
 import (
-	"github.com/daswf852/Shiba/bot/mbus"
-	"github.com/daswf852/Shiba/bot/message"
-	"github.com/daswf852/Shiba/common/irc"
+	"github.com/xor-shift/Shiba/bot/mbus"
+	"github.com/xor-shift/Shiba/bot/message"
+	"github.com/xor-shift/Shiba/common/irc"
 	"log"
 )
 

@@ -1,7 +1,7 @@
 package terminal
 
 import (
-	"github.com/daswf852/Shiba/bot/mbus"
+	"github.com/xor-shift/Shiba/bot/mbus"
 	"log"
 )
 

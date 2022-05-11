@@ -1,6 +1,6 @@
 package mbus
 
-import "github.com/daswf852/Shiba/bot/message"
+import "github.com/xor-shift/Shiba/bot/message"
 
 const (
 	MTypGeneric              = iota

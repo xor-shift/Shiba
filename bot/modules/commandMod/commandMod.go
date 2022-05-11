@@ -7,9 +7,9 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/daswf852/Shiba/bot/mbus"
-	"github.com/daswf852/Shiba/bot/message"
 	"github.com/jmoiron/sqlx"
+	"github.com/xor-shift/Shiba/bot/mbus"
+	"github.com/xor-shift/Shiba/bot/message"
 )
 
 type UserInformation struct {

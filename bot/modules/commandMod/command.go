@@ -1,6 +1,6 @@
 package commandMod
 
-import "github.com/daswf852/Shiba/bot/mbus"
+import "github.com/xor-shift/Shiba/bot/mbus"
 
 type Command struct {
 	Ident    string
